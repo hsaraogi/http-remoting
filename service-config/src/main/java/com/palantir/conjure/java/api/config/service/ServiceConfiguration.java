@@ -44,7 +44,28 @@ public interface ServiceConfiguration {
 
     Optional<Integer> maxNumRetries();
 
+    /**
+     * Indicates how the target node is selected for a given request.
+     */
+    Optional<NodeSelectionStrategy> nodeSelectionStrategy();
+
+    /**
+     * The amount of time a URL marked as failed should be avoided for subsequent calls. If the
+     * {@link #nodeSelectionStrategy} is ROUND_ROBIN, this must be a positive period of time.
+     */
+    Optional<Duration> failedUrlCooldown();
+
+    /**
+     * The size of one backoff time slot for call retries. For example, an exponential backoff retry algorithm may
+     * choose a backoff time in {@code [0, backoffSlotSize * 2^c]} for the c-th retry.
+     */
     Optional<Duration> backoffSlotSize();
+
+    /** Indicates whether client-side sympathetic QoS should be enabled. */
+    Optional<ClientQoS> clientQoS();
+
+    /** Indicates whether QosExceptions (other than RetryOther) should be propagated. */
+    Optional<ServerQoS> serverQoS();
 
     Optional<Boolean> enableGcmCipherSuites();
 
@@ -57,4 +78,40 @@ public interface ServiceConfiguration {
     }
 
     class Builder extends ImmutableServiceConfiguration.Builder {}
+
+    enum ClientQoS {
+        /** Default. */
+        ENABLED,
+
+        /**
+         * Disables the client-side sympathetic QoS. Consumers should almost never use this option, reserving it
+         * for where there are known issues with the QoS interaction. Please consult project maintainers if applying
+         * this option.
+         */
+        DANGEROUS_DISABLE_SYMPATHETIC_CLIENT_QOS
+    }
+
+    enum ServerQoS {
+        /** Default. */
+        AUTOMATIC_RETRY,
+
+        /**
+         * Propagate QosException.Throttle and QosException.Unavailable (429/503) to the caller. Consumers
+         * should use this when an upstream service has better context on how to handle the QoS error. This delegates
+         * the responsibility to the upstream service, which should use an appropriate conjure client to handle the
+         * response.
+         *
+         * For example, let us imagine a proxy server that serves both interactive and long-running background requests
+         * by dispatching requests to some backend. Interactive requests should be retried relatively few times in
+         * comparison to background jobs which run for minutes our even hours. The proxy server should use a backend
+         * client that propagates the QoS responses instead of retrying so the proxy client can handle them
+         * appropriately. There is no risk of retry storms because the retries are isolated to one layer, the proxy
+         * client.
+         *
+         * Note that QosException.RetryOther (308) is not propagated. If the proxy server is exposed on the front door
+         * but the backend is not, it makes no sense to redirect the caller to a new backend. The client will still
+         * follow redirects.
+         */
+        PROPAGATE_429_and_503_TO_CALLER
+    }
 }
